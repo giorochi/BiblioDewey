@@ -1,6 +1,9 @@
 flask
 pandas
 openpyxl
+requests
+scikit-learn
+numpy
+gunicorn
 transformers
 torch
-requests
