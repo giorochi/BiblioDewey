@@ -145,7 +145,7 @@ def consiglia():
         "books": selected,
         "risposta": explanation
     })
-    if__name__=="__main__":
+    if __name__=="__main__":
         import os
         PORT = int(os.environ.get("PORT",10000))
         app.run(host="0.0.0.0", port=PORT)
@@ -153,6 +153,7 @@ def consiglia():
 @app.route("/")
 def home():
     return "Bot IA Biblioteca attivo!"
+
 
 
 
