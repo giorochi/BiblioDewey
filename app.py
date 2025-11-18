@@ -13,9 +13,9 @@ app = Flask(__name__)
 # ============================
 #  SOSTITUISCI QUI I LINK
 # ============================
-DROPBOX_CATALOG_URL = "https://www.dropbox.com/scl/fi/zkp7eo8f2tnlsneemqvjx/catalogo.xlsx?rlkey=meiiqapmo6uzc1crf1b9kd2ct&dl=1
+DROPBOX_CATALOG_URL = "https://www.dropbox.com/scl/fi/zkp7eo8f2tnlsneemqvjx/catalogo.xlsx?rlkey=meiiqapmo6uzc1crf1b9kd2ct&dl=1"
 "
-DROPBOX_DEWEY_URL   = "https://www.dropbox.com/scl/fi/wynic8v2mt51cfk0es5m4/Argomenti.xlsx?rlkey=38lsti7r48xlehxccgdz21ive&dl=1
+DROPBOX_DEWEY_URL   = "https://www.dropbox.com/scl/fi/wynic8v2mt51cfk0es5m4/Argomenti.xlsx?rlkey=38lsti7r48xlehxccgdz21ive&dl=1"
 "
 # ============================
 
@@ -151,3 +151,4 @@ def consiglia():
 @app.route("/")
 def home():
     return "Bot IA Biblioteca attivo!"
+
