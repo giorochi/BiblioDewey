@@ -17,7 +17,8 @@ TOP_N_BOOKS = 6
 def download_excel(url):
     r = requests.get(url, timeout=30)
     r.raise_for_status()
-    return pd.read_excel(io.BytesIO(r.content))
+    return pd.read_excel(io.BytesIO(r.content), engine='openpyxl')
+
 
 # 🔹 Carica una volta sola al deploy
 df_catalog, df_dewey = download_excel(DROPBOX_CATALOG_URL), download_excel(DROPBOX_DEWEY_URL)
@@ -49,3 +50,4 @@ if __name__ == "__main__":
     import os
     PORT = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=PORT)
+
