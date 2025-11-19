@@ -1,20 +1,22 @@
 # app.py
 from flask import Flask, request, jsonify
 import pandas as pd
-import requests
-import io
+import requests, io
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
+import os
+
+# Hugging Face API
+import requests as hf_requests
 
 app = Flask(__name__)
 
 # ============================
-# LINK DIRETTI DROPBOX (dl=1)
+# LINK DROPBOX DIRETTI
 # ============================
 DROPBOX_CATALOG_URL = "https://www.dropbox.com/s/zkp7eo8f2tnlsneemqvjx/catalogo.xlsx?dl=1"
 DROPBOX_DEWEY_URL   = "https://www.dropbox.com/s/wynic8v2mt51cfk0es5m4/Argomenti.xlsx?dl=1"
-# ============================
 
 # Parametri
 TOP_K_DEWEY_MATCHES = 1
@@ -29,7 +31,6 @@ _cached_dewey = None
 def download_excel(url):
     r = requests.get(url, timeout=30)
     r.raise_for_status()
-    # specifica engine per .xlsx
     return pd.read_excel(io.BytesIO(r.content), engine='openpyxl')
 
 def get_dataframes():
@@ -37,21 +38,16 @@ def get_dataframes():
     if _cached_catalog is None or _cached_dewey is None:
         _cached_catalog = download_excel(DROPBOX_CATALOG_URL)
         _cached_dewey   = download_excel(DROPBOX_DEWEY_URL)
-        # Normalizza IDArgomento
         _cached_catalog['IDArgomento'] = _cached_catalog['IDArgomento'].astype(str).str.replace(r'\.0$', '', regex=True)
         _cached_dewey['IDArgomento'] = _cached_dewey['IDArgomento'].astype(str).str.replace(r'\.0$', '', regex=True)
     return _cached_catalog, _cached_dewey
 
 # ----------------------------
-# Funzione per trovare Dewey più simile
+# Dewey matching
 # ----------------------------
 def find_dewey_for_text(user_text, df_dewey):
     descr_col_candidates = ['Descrizione', 'DescrizioneArgomento', 'Nome', 'NomeArgomento', 'Argomento', 'Titolo']
-    descr_col = None
-    for c in descr_col_candidates:
-        if c in df_dewey.columns:
-            descr_col = c
-            break
+    descr_col = next((c for c in descr_col_candidates if c in df_dewey.columns), None)
     if descr_col is None:
         cols = [c for c in df_dewey.columns if c != 'IDArgomento']
         descr_col = cols[0] if cols else 'IDArgomento'
@@ -68,22 +64,26 @@ def find_dewey_for_text(user_text, df_dewey):
     return best_ids
 
 # ----------------------------
-# Genera spiegazione dei libri
+# Generazione risposta IA tramite Hugging Face API gratuita
 # ----------------------------
-def generate_explanation(user_text, selected_books, selected_dewey):
-    explanation = f"Ho identificato la categoria Dewey: {selected_dewey}.\n"
-    explanation += "Ecco i libri che ho trovato e perché li suggerisco:\n"
-    for i, b in enumerate(selected_books[:TOP_N_BOOKS], start=1):
-        titolo = b.get('Titolo', 'Titolo non disponibile')
-        autore = b.get('Autore', 'Autore sconosciuto')
-        dew = b.get('IDArgomento', '')
-        motivo = "Buona corrispondenza alla categoria."
-        if 'Descrizione' in b and isinstance(b['Descrizione'], str) and len(b['Descrizione'])>30:
-            motivo = "Descrizione utile e pertinente."
-        if i == 1:
-            motivo = "Scelta consigliata: introduzione/approfondimento bilanciato adatto alla richiesta."
-        explanation += f"{i}. {titolo} — {autore} (Dewey {dew}) → {motivo}\n"
-    return explanation
+HUGGINGFACE_TOKEN = os.environ.get("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")  # token Hugging Face gratuito
+MODEL_ID = "tiiuae/falcon-7b-instruct"          # modello disponibile su Hugging Face
+
+def generate_ai_response(user_text, selected_books, selected_dewey):
+    libro_str = "\n".join([f"- {b['Titolo']} di {b.get('Autore','Sconosciuto')}" for b in selected_books[:TOP_N_BOOKS]])
+    prompt = f"L'utente ha chiesto: '{user_text}'.\nCategoria Dewey: {selected_dewey}.\nLibri disponibili:\n{libro_str}\nConsiglia i migliori libri e spiega perché sono adatti."
+    
+    headers = {"Authorization": f"Bearer {HUGGINGFACE_TOKEN}"}
+    json_data = {"inputs": prompt, "parameters": {"max_new_tokens": 200}}
+    
+    response = hf_requests.post(f"https://api-inference.huggingface.co/models/{MODEL_ID}", headers=headers, json=json_data)
+    if response.status_code == 200:
+        try:
+            return response.json()[0]['generated_text']
+        except:
+            return f"Consiglio basato su Dewey {selected_dewey}:\n{libro_str}"
+    else:
+        return f"Consiglio basato su Dewey {selected_dewey}:\n{libro_str}"
 
 # ----------------------------
 # Route principale
@@ -106,17 +106,14 @@ def consiglia():
         selected_dewey = str(given_dewey)
     else:
         best_ids = find_dewey_for_text(user_text, df_dewey)
-        if not best_ids:
-            return jsonify({"risposta": "Non sono riuscito a identificare una categoria Dewey dalla tua richiesta."})
-        selected_dewey = best_ids[0]
+        selected_dewey = best_ids[0] if best_ids else "N/A"
 
-    # Filtra catalogo per Dewey
     matches = df_catalog[df_catalog['IDArgomento'].astype(str).str.startswith(selected_dewey)]
     if matches.empty:
         return jsonify({"risposta": f"Nessun libro trovato per la categoria {selected_dewey}."})
 
     selected = matches.head(TOP_N_BOOKS).to_dict(orient='records')
-    explanation = generate_explanation(user_text, selected, selected_dewey)
+    explanation = generate_ai_response(user_text, selected, selected_dewey)
 
     return jsonify({
         "selected_dewey": selected_dewey,
@@ -136,6 +133,5 @@ def home():
 # Avvio server
 # ----------------------------
 if __name__ == "__main__":
-    import os
     PORT = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=PORT)
