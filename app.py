@@ -21,32 +21,29 @@ TOP_K_DEWEY_MATCHES = 1
 TOP_N_BOOKS = 6
 
 # ----------------------------
-# Funzione per scaricare Excel
+# Cache dei file Excel
 # ----------------------------
+_cached_catalog = None
+_cached_dewey = None
+
 def download_excel(url):
     r = requests.get(url, timeout=30)
     r.raise_for_status()
-    # Controllo content-type per sicurezza
-    if 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' not in r.headers.get('Content-Type', ''):
-        raise ValueError(f"Il file scaricato da {url} non è un Excel valido")
+    # specifica engine per .xlsx
     return pd.read_excel(io.BytesIO(r.content), engine='openpyxl')
 
-# ----------------------------
-# Carica i file una sola volta
-# ----------------------------
-try:
-    df_catalog = download_excel(DROPBOX_CATALOG_URL)
-    df_dewey   = download_excel(DROPBOX_DEWEY_URL)
-except Exception as e:
-    print("Errore caricamento file Dropbox:", e)
-    df_catalog, df_dewey = pd.DataFrame(), pd.DataFrame()
-
-# Normalizza IDArgomento
-df_catalog['IDArgomento'] = df_catalog['IDArgomento'].astype(str).str.replace(r'\.0$', '', regex=True)
-df_dewey['IDArgomento'] = df_dewey['IDArgomento'].astype(str).str.replace(r'\.0$', '', regex=True)
+def get_dataframes():
+    global _cached_catalog, _cached_dewey
+    if _cached_catalog is None or _cached_dewey is None:
+        _cached_catalog = download_excel(DROPBOX_CATALOG_URL)
+        _cached_dewey   = download_excel(DROPBOX_DEWEY_URL)
+        # Normalizza IDArgomento
+        _cached_catalog['IDArgomento'] = _cached_catalog['IDArgomento'].astype(str).str.replace(r'\.0$', '', regex=True)
+        _cached_dewey['IDArgomento'] = _cached_dewey['IDArgomento'].astype(str).str.replace(r'\.0$', '', regex=True)
+    return _cached_catalog, _cached_dewey
 
 # ----------------------------
-# Funzione per trovare Dewey
+# Funzione per trovare Dewey più simile
 # ----------------------------
 def find_dewey_for_text(user_text, df_dewey):
     descr_col_candidates = ['Descrizione', 'DescrizioneArgomento', 'Nome', 'NomeArgomento', 'Argomento', 'Titolo']
@@ -62,7 +59,7 @@ def find_dewey_for_text(user_text, df_dewey):
         descr_col = '__descr__'
 
     texts = df_dewey[descr_col].fillna('').astype(str).values
-    vect = TfidfVectorizer(stop_words='italian', ngram_range=(1,2)).fit(texts.tolist() + [user_text])
+    vect = TfidfVectorizer(stop_words='italian', ngram_range=(1,2)).fit(list(texts) + [user_text])
     X = vect.transform(texts)
     q = vect.transform([user_text])
     sims = cosine_similarity(q, X)[0]
@@ -71,7 +68,7 @@ def find_dewey_for_text(user_text, df_dewey):
     return best_ids
 
 # ----------------------------
-# Genera spiegazione
+# Genera spiegazione dei libri
 # ----------------------------
 def generate_explanation(user_text, selected_books, selected_dewey):
     explanation = f"Ho identificato la categoria Dewey: {selected_dewey}.\n"
@@ -100,8 +97,10 @@ def consiglia():
     if not user_text:
         return jsonify({"error": "Nessuna richiesta fornita"}), 400
 
-    if df_catalog.empty or df_dewey.empty:
-        return jsonify({"error": "I file Excel non sono disponibili."}), 500
+    try:
+        df_catalog, df_dewey = get_dataframes()
+    except Exception as e:
+        return jsonify({"error": "Errore caricamento file Excel", "details": str(e)}), 500
 
     if given_dewey:
         selected_dewey = str(given_dewey)
@@ -126,6 +125,9 @@ def consiglia():
         "risposta": explanation
     })
 
+# ----------------------------
+# Home
+# ----------------------------
 @app.route("/")
 def home():
     return "Bot IA Biblioteca attivo!"
