@@ -8,8 +8,8 @@ app = Flask(__name__)
 HF_API_KEY = "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"
 MODEL = "mistralai/Mistral-Nemo-Instruct-2407"
 
-DROPBOX_CATALOG_URL = "LINK_EXCEL_CATALOGO"
-DROPBOX_DEWEY_URL = "LINK_EXCEL_DEWEY"
+DROPBOX_CATALOG_URL = "https://www.dropbox.com/scl/fi/zkp7eo8f2tnlsneemqvjx/catalogo.xlsx?rlkey=meiiqapmo6uzc1crf1b9kd2ct&e=1&dl=1"
+DROPBOX_DEWEY_URL = "https://www.dropbox.com/scl/fi/wynic8v2mt51cfk0es5m4/Argomenti.xlsx?rlkey=38lsti7r48xlehxccgdz21ive&dl=1"
 
 
 def download_excel(url):
@@ -64,3 +64,4 @@ def consiglia():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
+
