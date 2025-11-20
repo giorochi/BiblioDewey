@@ -1,137 +1,66 @@
-# app.py
-from flask import Flask, request, jsonify
+import requests
 import pandas as pd
-import requests, io
-import numpy as np
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
-import os
-
-# Hugging Face API
-import requests as hf_requests
+import io
+from flask import Flask, request, jsonify, render_template
 
 app = Flask(__name__)
 
-# ============================
-# LINK DROPBOX DIRETTI
-# ============================
-DROPBOX_CATALOG_URL = "https://www.dropbox.com/s/zkp7eo8f2tnlsneemqvjx/catalogo.xlsx?dl=1"
-DROPBOX_DEWEY_URL   = "https://www.dropbox.com/s/wynic8v2mt51cfk0es5m4/Argomenti.xlsx?dl=1"
+HF_API_KEY = "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"
+MODEL = "mistralai/Mistral-Nemo-Instruct-2407"
 
-# Parametri
-TOP_K_DEWEY_MATCHES = 1
-TOP_N_BOOKS = 6
+DROPBOX_CATALOG_URL = "LINK_EXCEL_CATALOGO"
+DROPBOX_DEWEY_URL = "LINK_EXCEL_DEWEY"
 
-# ----------------------------
-# Cache dei file Excel
-# ----------------------------
-_cached_catalog = None
-_cached_dewey = None
 
 def download_excel(url):
-    r = requests.get(url, timeout=30)
+    """Scarica Excel da Dropbox"""
+    url = url.replace("www.dropbox.com", "dl.dropboxusercontent.com")
+    r = requests.get(url)
     r.raise_for_status()
-    return pd.read_excel(io.BytesIO(r.content), engine='openpyxl')
+    return pd.read_excel(io.BytesIO(r.content), engine="openpyxl")
 
-def get_dataframes():
-    global _cached_catalog, _cached_dewey
-    if _cached_catalog is None or _cached_dewey is None:
-        _cached_catalog = download_excel(DROPBOX_CATALOG_URL)
-        _cached_dewey   = download_excel(DROPBOX_DEWEY_URL)
-        _cached_catalog['IDArgomento'] = _cached_catalog['IDArgomento'].astype(str).str.replace(r'\.0$', '', regex=True)
-        _cached_dewey['IDArgomento'] = _cached_dewey['IDArgomento'].astype(str).str.replace(r'\.0$', '', regex=True)
-    return _cached_catalog, _cached_dewey
 
-# ----------------------------
-# Dewey matching
-# ----------------------------
-def find_dewey_for_text(user_text, df_dewey):
-    descr_col_candidates = ['Descrizione', 'DescrizioneArgomento', 'Nome', 'NomeArgomento', 'Argomento', 'Titolo']
-    descr_col = next((c for c in descr_col_candidates if c in df_dewey.columns), None)
-    if descr_col is None:
-        cols = [c for c in df_dewey.columns if c != 'IDArgomento']
-        descr_col = cols[0] if cols else 'IDArgomento'
-        df_dewey['__descr__'] = df_dewey[descr_col].astype(str)
-        descr_col = '__descr__'
+df_catalog = download_excel(DROPBOX_CATALOG_URL)
+df_dewey = download_excel(DROPBOX_DEWEY_URL)
 
-    texts = df_dewey[descr_col].fillna('').astype(str).values
-    vect = TfidfVectorizer(stop_words='italian', ngram_range=(1,2)).fit(list(texts) + [user_text])
-    X = vect.transform(texts)
-    q = vect.transform([user_text])
-    sims = cosine_similarity(q, X)[0]
-    top_idx = np.argsort(sims)[::-1][:TOP_K_DEWEY_MATCHES]
-    best_ids = df_dewey.iloc[top_idx]['IDArgomento'].astype(str).tolist()
-    return best_ids
 
-# ----------------------------
-# Generazione risposta IA tramite Hugging Face API gratuita
-# ----------------------------
-HUGGINGFACE_TOKEN = os.environ.get("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")  # token Hugging Face gratuito
-MODEL_ID = "tiiuae/falcon-7b-instruct"          # modello disponibile su Hugging Face
+def ai_chat(prompt):
+    headers = {"Authorization": f"Bearer {HF_API_KEY}"}
+    payload = {"inputs": prompt}
 
-def generate_ai_response(user_text, selected_books, selected_dewey):
-    libro_str = "\n".join([f"- {b['Titolo']} di {b.get('Autore','Sconosciuto')}" for b in selected_books[:TOP_N_BOOKS]])
-    prompt = f"L'utente ha chiesto: '{user_text}'.\nCategoria Dewey: {selected_dewey}.\nLibri disponibili:\n{libro_str}\nConsiglia i migliori libri e spiega perché sono adatti."
-    
-    headers = {"Authorization": f"Bearer {HUGGINGFACE_TOKEN}"}
-    json_data = {"inputs": prompt, "parameters": {"max_new_tokens": 200}}
-    
-    response = hf_requests.post(f"https://api-inference.huggingface.co/models/{MODEL_ID}", headers=headers, json=json_data)
-    if response.status_code == 200:
-        try:
-            return response.json()[0]['generated_text']
-        except:
-            return f"Consiglio basato su Dewey {selected_dewey}:\n{libro_str}"
-    else:
-        return f"Consiglio basato su Dewey {selected_dewey}:\n{libro_str}"
+    r = requests.post(
+        f"https://api-inference.huggingface.co/models/{MODEL}",
+        headers=headers,
+        json=payload,
+    )
 
-# ----------------------------
-# Route principale
-# ----------------------------
-@app.route("/consiglia", methods=["POST"])
-def consiglia():
-    data = request.get_json(force=True)
-    user_text = data.get("richiesta", "").strip()
-    given_dewey = data.get("dewey", "").strip()
+    data = r.json()
+    return data[0]["generated_text"]
 
-    if not user_text:
-        return jsonify({"error": "Nessuna richiesta fornita"}), 400
 
-    try:
-        df_catalog, df_dewey = get_dataframes()
-    except Exception as e:
-        return jsonify({"error": "Errore caricamento file Excel", "details": str(e)}), 500
-
-    if given_dewey:
-        selected_dewey = str(given_dewey)
-    else:
-        best_ids = find_dewey_for_text(user_text, df_dewey)
-        selected_dewey = best_ids[0] if best_ids else "N/A"
-
-    matches = df_catalog[df_catalog['IDArgomento'].astype(str).str.startswith(selected_dewey)]
-    if matches.empty:
-        return jsonify({"risposta": f"Nessun libro trovato per la categoria {selected_dewey}."})
-
-    selected = matches.head(TOP_N_BOOKS).to_dict(orient='records')
-    explanation = generate_ai_response(user_text, selected, selected_dewey)
-
-    return jsonify({
-        "selected_dewey": selected_dewey,
-        "n_results": len(matches),
-        "books": selected,
-        "risposta": explanation
-    })
-
-# ----------------------------
-# Home
-# ----------------------------
 @app.route("/")
 def home():
     return "Bot IA Biblioteca attivo!"
 
-# ----------------------------
-# Avvio server
-# ----------------------------
+
+@app.route("/chat")
+def chat():
+    return render_template("chat.html")
+
+
+@app.route("/consiglia", methods=["POST"])
+def consiglia():
+    richiesta = request.json["richiesta"]
+
+    testo_ai = (
+        f"Sei il bot della biblioteca. L’utente chiede: {richiesta}. "
+        "Rispondi in modo naturale e utile."
+    )
+
+    risposta = ai_chat(testo_ai)
+
+    return jsonify({"risposta": risposta})
+
+
 if __name__ == "__main__":
-    PORT = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=PORT)
+    app.run(host="0.0.0.0", port=10000)
