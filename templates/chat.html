@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<title>Chat Bot IA Biblioteca</title>
+<style>
+body { font-family: sans-serif; margin: 40px; }
+textarea { width: 400px; height: 80px; }
+pre { background: #f4f4f4; padding: 10px; width: 400px; min-height: 100px; }
+button { padding: 10px 20px; margin-top: 10px; }
+</style>
+</head>
+<body>
+<h1>Chat Bot IA Biblioteca</h1>
+
+<textarea id="input" placeholder="Scrivi qui..."></textarea><br>
+<button onclick="manda()">Invia</button>
+
+<pre id="output"></pre>
+
+<script>
+async function manda() {
+  const text = document.getElementById("input").value;
+  document.getElementById("output").textContent = "Sto scrivendo...";
+
+  const res = await fetch("/consiglia", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({ richiesta: text })
+  });
+
+  const data = await res.json();
+  document.getElementById("output").textContent = data.risposta;
+}
+</script>
+
+</body>
+</html>
