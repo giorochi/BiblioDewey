@@ -15,9 +15,6 @@ DROPBOX_CATALOG_URL = "https://www.dropbox.com/scl/fi/zkp7eo8f2tnlsneemqvjx/cata
 DROPBOX_DEWEY_URL = "https://www.dropbox.com/scl/fi/wynic8v2mt51cfk0es5m4/Argomenti.xlsx?rlkey=38lsti7r48xlehxccgdz21ive&dl=1"
 
 
-# ==========================================
-# FUNZIONE DOWNLOAD EXCEL DA DROPBOX
-# ==========================================
 def download_excel(url):
     url = url.replace("www.dropbox.com", "dl.dropboxusercontent.com")
     r = requests.get(url)
@@ -25,13 +22,12 @@ def download_excel(url):
     return pd.read_excel(io.BytesIO(r.content), engine="openpyxl")
 
 
-# Scarico i file all'avvio
 df_catalog = download_excel(DROPBOX_CATALOG_URL)
 df_dewey = download_excel(DROPBOX_DEWEY_URL)
 
 
 # ==========================================
-# FUNZIONE AI GROQ
+# FUNZIONE AI GROQ (VERSIONE CORRETTA)
 # ==========================================
 def ai_chat(prompt):
     url = "https://api.groq.com/openai/v1/chat/completions"
@@ -47,12 +43,16 @@ def ai_chat(prompt):
             {"role": "system", "content": "Sei il bot intelligente della Biblioteca Parrocchiale."},
             {"role": "user", "content": prompt}
         ],
-        "temperature": 0.6
+        "temperature": 0.7,
+        "max_tokens": 512
     }
 
     try:
-        r = requests.post(url, headers=headers, json=payload, timeout=20)
-        r.raise_for_status()
+        r = requests.post(url, headers=headers, json=payload)
+
+        # Se Groq manda errore, lo vediamo chiaro
+        if r.status_code != 200:
+            return f"Errore API: {r.status_code} - {r.text}"
 
         data = r.json()
         return data["choices"][0]["message"]["content"]
@@ -61,9 +61,6 @@ def ai_chat(prompt):
         return f"Errore API: {e}"
 
 
-# ==========================================
-# ROUTES
-# ==========================================
 @app.route("/")
 def home():
     return "Bot IA Biblioteca attivo con GROQ!"
@@ -88,8 +85,5 @@ def consiglia():
     return jsonify({"risposta": risposta})
 
 
-# ==========================================
-# AVVIO
-# ==========================================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
