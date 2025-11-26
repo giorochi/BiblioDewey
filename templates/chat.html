@@ -1,38 +1,48 @@
 <!DOCTYPE html>
 <html lang="it">
 <head>
-<meta charset="UTF-8">
-<title>Chat Bot IA Biblioteca</title>
-<style>
-body { font-family: sans-serif; margin: 40px; }
-textarea { width: 400px; height: 80px; }
-pre { background: #f4f4f4; padding: 10px; width: 400px; min-height: 100px; }
-button { padding: 10px 20px; margin-top: 10px; }
-</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat Biblioteca</title>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
 </head>
 <body>
-<h1>Chat Bot IA Biblioteca</h1>
+    <h1>Chat con il Bot della Biblioteca</h1>
+    
+    <div id="chat-box">
+        <div id="chat-messages"></div>
+    </div>
 
-<textarea id="input" placeholder="Scrivi qui..."></textarea><br>
-<button onclick="manda()">Invia</button>
+    <input type="text" id="user-input" placeholder="Chiedi qualcosa...">
+    <button id="send-btn">Invia</button>
 
-<pre id="output"></pre>
+    <script>
+        $(document).ready(function() {
+            $('#send-btn').click(function() {
+                var userInput = $('#user-input').val();
+                if (userInput.trim() !== "") {
+                    $('#chat-messages').append("<div><strong>Tu:</strong> " + userInput + "</div>");
+                    $('#user-input').val("");  // Clear input field
 
-<script>
-async function manda() {
-  const text = document.getElementById("input").value;
-  document.getElementById("output").textContent = "Sto scrivendo...";
+                    // Show loading message
+                    $('#chat-messages').append("<div><strong>Bot:</strong> Sto scrivendo...</div>");
 
-  const res = await fetch("/consiglia", {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({ richiesta: text })
-  });
-
-  const data = await res.json();
-  document.getElementById("output").textContent = data.risposta;
-}
-</script>
-
+                    // Send the input to the backend for processing
+                    $.ajax({
+                        url: '/consiglia',
+                        type: 'POST',
+                        contentType: 'application/json',
+                        data: JSON.stringify({ "richiesta": userInput }),
+                        success: function(response) {
+                            $('#chat-messages').append("<div><strong>Bot:</strong> " + response.risposta + "</div>");
+                        },
+                        error: function() {
+                            $('#chat-messages').append("<div><strong>Bot:</strong> Si è verificato un errore. Riprova più tardi.</div>");
+                        }
+                    });
+                }
+            });
+        });
+    </script>
 </body>
 </html>
