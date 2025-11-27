@@ -6,46 +6,68 @@ import logging
 
 app = Flask(__name__)
 
-# Configura il logging
 logging.basicConfig(level=logging.DEBUG)
 
-# Link Dropbox modificati per il download diretto
+# ================
+# CONFIGURAZIONE
+# ================
+
+GROQ_API_KEY = "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"
+MODEL = "llama3-8b-70k"  # modello stabile suggerito da Groq
+
 DROPBOX_CATALOG_URL = "https://dl.dropboxusercontent.com/scl/fi/zkp7eo8f2tnlsneemqvjx/catalogo.xlsx?rlkey=3wcn05kwsusu3vnnwf5nqg5on&st=xp2813pp&dl=1"
 DROPBOX_DEWEY_URL = "https://dl.dropboxusercontent.com/scl/fi/wynic8v2mt51cfk0es5m4/Argomenti.xlsx?rlkey=kjgt8etgum3w72mo5c9gzkqvp&st=3fclbbjy&dl=1"
 
+# ================
+# DOWNLOAD FILE
+# ================
+
 def download_excel(url):
-    """Scarica Excel da Dropbox"""
     try:
         r = requests.get(url)
-        r.raise_for_status()  # Solleva un'eccezione per gli errori HTTP
+        r.raise_for_status()
         return pd.read_excel(io.BytesIO(r.content), engine="openpyxl")
-    except requests.exceptions.RequestException as e:
-        logging.error(f"Errore durante il download del file Excel: {e}")
-        raise Exception("Errore durante il download del file Excel.")  # Rilancia l'errore per il debug
+    except Exception as e:
+        logging.error(f"Errore download {url}: {e}")
+        raise
 
 df_catalog = download_excel(DROPBOX_CATALOG_URL)
 df_dewey = download_excel(DROPBOX_DEWEY_URL)
 
+# ================
+# AI (GROQ)
+# ================
+
 def ai_chat(prompt):
-    headers = {"Authorization": f"Bearer {HF_API_KEY}"}
-    payload = {"inputs": prompt}
+
+    url = "https://api.groq.com/openai/v1/chat/completions"
+
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {GROQ_API_KEY}"
+    }
+
+    payload = {
+        "model": MODEL,
+        "messages": [
+            {"role": "system", "content": "Sei il bot della biblioteca e devi dare risposte utili, sintetiche e precise."},
+            {"role": "user", "content": prompt}
+        ]
+    }
 
     try:
-        r = requests.post(
-            f"https://api-inference.huggingface.co/models/{MODEL}",
-            headers=headers,
-            json=payload,
-        )
+        r = requests.post(url, headers=headers, json=payload)
+        r.raise_for_status()
+        data = r.json()
+        return data["choices"][0]["message"]["content"]
 
-        if r.status_code == 200:
-            data = r.json()
-            return data[0]["generated_text"]
-        else:
-            logging.error(f"Errore API: {r.status_code} - {r.text}")
-            return f"Errore nell'API: {r.status_code} - {r.text}"
-    except requests.exceptions.RequestException as e:
-        logging.error(f"Errore nella richiesta API: {str(e)}")
-        return f"Errore nella richiesta API: {str(e)}"
+    except Exception as e:
+        logging.error(f"Errore API GROQ: {e}")
+        return f"Errore API: {e}"
+
+# ================
+# ROUTES
+# ================
 
 @app.route("/")
 def home():
@@ -60,15 +82,20 @@ def consiglia():
     try:
         richiesta = request.json["richiesta"]
         logging.debug(f"Richiesta ricevuta: {richiesta}")
-        
-        testo_ai = f"Sei il bot della biblioteca. L’utente chiede: {richiesta}. Rispondi in modo naturale e utile."
-        
+
+        testo_ai = f"L'utente chiede: {richiesta}. Rispondi usando SOLO i dati del catalogo e delle collocazioni."
+
         risposta = ai_chat(testo_ai)
-        
+
         return jsonify({"risposta": risposta})
+
     except Exception as e:
-        logging.error(f"Errore durante il processamento della richiesta: {e}")
-        return jsonify({"risposta": "Si è verificato un errore durante il processamento della richiesta."})
+        logging.error(f"Errore durante il processamento: {e}")
+        return jsonify({"risposta": "Errore interno durante l'elaborazione."})
+
+# ================
+# RUN
+# ================
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
