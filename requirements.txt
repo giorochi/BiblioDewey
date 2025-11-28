@@ -3,5 +3,4 @@ pandas
 openpyxl
 requests
 gunicorn
-scikit-learn
-
+groq
