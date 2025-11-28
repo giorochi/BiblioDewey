@@ -1,104 +1,77 @@
 import os
-import pandas as pd
-from flask import Flask, request, jsonify
-from groq import Groq
+import io
 import requests
-from io import BytesIO
+import pandas as pd
+from flask import Flask, request, jsonify, render_template
 
+# --- CONFIG ---
 app = Flask(__name__)
 
-# -----------------------
-# 1. CARICA CATALOGO E ARGOMENTI DA DROPBOX
-# -----------------------
+# API key (da impostare come variabile d'ambiente su Render)
+AI_API_KEY = os.environ.get("OPENROUTER_API_KEY")
+MODEL = "openrouter/airoboros-mini-1"  # Modello gratuito di esempio
 
-CATALOGO_URL = "https://www.dropbox.com/scl/fi/zkp7eo8f2tnlsneemqvjx/catalogo.xlsx?dl=1"
-ARGOMENTI_URL = "https://www.dropbox.com/scl/fi/wynic8v2mt51cfk0es5m4/Argomenti.xlsx?dl=1"
+# Link Excel Dropbox (con dl=1 per download diretto)
+DROPBOX_CATALOG_URL = "https://www.dropbox.com/scl/fi/zkp7eo8f2tnlsneemqvjx/catalogo.xlsx?dl=1"
+DROPBOX_DEWEY_URL = "https://www.dropbox.com/scl/fi/wynic8v2mt51cfk0es5m4/Argomenti.xlsx?dl=1"
 
-def scarica_excel(url):
-    resp = requests.get(url)
-    resp.raise_for_status()
-    return pd.read_excel(BytesIO(resp.content))
+# --- FUNZIONI ---
+def download_excel(url):
+    """Scarica Excel da Dropbox e legge con pandas"""
+    url = url.replace("www.dropbox.com", "dl.dropboxusercontent.com")
+    r = requests.get(url)
+    r.raise_for_status()
+    return pd.read_excel(io.BytesIO(r.content), engine="openpyxl")
 
 try:
-    catalogo = scarica_excel(CATALOGO_URL)
-    argomenti = scarica_excel(ARGOMENTI_URL)
+    df_catalog = download_excel(DROPBOX_CATALOG_URL)
+    df_dewey = download_excel(DROPBOX_DEWEY_URL)
 except Exception as e:
-    print("Errore nel caricamento dei file Excel:", e)
-    catalogo = pd.DataFrame()
-    argomenti = pd.DataFrame()
+    print(f"Errore nel caricamento dei file Excel: {e}")
+    df_catalog = pd.DataFrame()
+    df_dewey = pd.DataFrame()
 
+def ai_chat(prompt):
+    """Interroga l'API OpenRouter/Groq"""
+    headers = {"Authorization": f"Bearer {AI_API_KEY}"}
+    payload = {
+        "model": MODEL,
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": 500
+    }
+    try:
+        r = requests.post("https://api.openrouter.ai/v1/chat/completions", headers=headers, json=payload)
+        r.raise_for_status()
+        data = r.json()
+        return data["choices"][0]["message"]["content"]
+    except Exception as e:
+        print(f"Errore API: {e}")
+        return "Si è verificato un errore durante la richiesta al bot AI."
 
-# -----------------------
-# 2. CONFIGURA GROQ
-# -----------------------
-
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
-
-if GROQ_API_KEY is None:
-    raise ValueError("La variabile d'ambiente GROQ_API_KEY non è impostata!")
-
-client = Groq(api_key=GROQ_API_KEY)
-
-
-# -----------------------
-# 3. HOME ROUTE
-# -----------------------
-
+# --- ROUTE ---
 @app.route("/")
 def home():
-    return "Bot della Biblioteca attivo e funzionante."
+    return "Bot IA Biblioteca attivo!"
 
-
-# -----------------------
-# 4. API: CONSIGLIA
-# -----------------------
+@app.route("/chat")
+def chat_page():
+    # Assicurati di avere chat.html nella cartella templates
+    return render_template("chat.html")
 
 @app.route("/consiglia", methods=["POST"])
 def consiglia():
+    richiesta = request.json.get("richiesta", "")
+    if not richiesta:
+        return jsonify({"risposta": "Richiesta vuota."})
 
-    data = request.json
-    if not data or "domanda" not in data:
-        return jsonify({"errore": "Manca il campo 'domanda'"}), 400
+    # Prompt personalizzato con catalogo e collocazione
+    prompt = f"Sei un assistente della biblioteca. L'utente chiede: {richiesta}. " \
+             f"Rispondi solo con libri presenti nel catalogo e indica la collocazione."
 
-    domanda = data["domanda"]
+    risposta = ai_chat(prompt)
+    return jsonify({"risposta": risposta})
 
-    # Se vuoi debug
-    print("Domanda ricevuta:", domanda)
-
-    try:
-        # Costruisci prompt
-        prompt = f"""
-Sei il bibliotecario digitale. Rispondi alla domanda dell’utente
-usando SOLO i dati del catalogo e degli argomenti.
-
-CATALOGO:
-{catalogo.to_string(index=False)}
-
-ARGOMENTI:
-{argomenti.to_string(index=False)}
-
-Domanda utente: {domanda}
-"""
-
-        response = client.chat.completions.create(
-            model="llama3-70b-8192",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.5,
-        )
-
-        testo = response.choices[0].message["content"]
-
-        return jsonify({"risposta": testo})
-
-    except Exception as e:
-        print("Errore durante la richiesta a GROQ:", e)
-        return jsonify({"errore": str(e)}), 500
-
-
-# -----------------------
-# 5. AVVIO COMPATIBILE CON RENDER
-# -----------------------
-
+# --- AVVIO ---
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
